@@ -21,6 +21,8 @@ import subprocess
 import json
 import tempfile
 import mimetypes
+from pathlib import Path
+from typing import Dict, List
 
 try:
     import magic
@@ -31,7 +33,7 @@ from PIL import Image, ImageSequence, ImageFilter
 
 from . import matrix
 
-open_utf8 = partial(open, encoding='UTF-8')
+open_utf8 = partial(open, encoding="UTF-8")
 
 
 def guess_mime(data: bytes) -> str:
@@ -59,7 +61,22 @@ def _video_to_webp(data: bytes) -> bytes:
             print(".", end="", flush=True)
             ffmpeg_encoder_args = []
             if mime == "video/webm":
-                encode = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=nokey=1:noprint_wrappers=1", video.name], capture_output=True, text=True).stdout.strip()
+                encode = subprocess.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=codec_name",
+                        "-of",
+                        "default=nokey=1:noprint_wrappers=1",
+                        video.name,
+                    ],
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
                 ffmpeg_encoder = None
                 if encode == "vp8":
                     ffmpeg_encoder = "libvpx"
@@ -67,10 +84,25 @@ def _video_to_webp(data: bytes) -> bytes:
                     ffmpeg_encoder = "libvpx-vp9"
                 if ffmpeg_encoder:
                     ffmpeg_encoder_args = ["-c:v", ffmpeg_encoder]
-            result = subprocess.run(["ffmpeg", "-y", "-threads", "auto", *ffmpeg_encoder_args, "-i", video.name, "-lossless", "1", webp.name],
-                                    capture_output=True)
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-threads",
+                    "auto",
+                    *ffmpeg_encoder_args,
+                    "-i",
+                    video.name,
+                    "-lossless",
+                    "1",
+                    webp.name,
+                ],
+                capture_output=True,
+            )
             if result.returncode != 0:
-                raise RuntimeError(f"Run ffmpeg failed with code {result.returncode}, Error occurred:\n{result.stderr}")
+                raise RuntimeError(
+                    f"Run ffmpeg failed with code {result.returncode}, Error occurred:\n{result.stderr}"
+                )
             webp.seek(0)
             return webp.read()
 
@@ -84,10 +116,24 @@ def video_to_webp(data: bytes) -> bytes:
         temp.flush()
         with tempfile.NamedTemporaryFile(suffix=ext) as temp_fixed:
             print(".", end="", flush=True)
-            result = subprocess.run(["ffmpeg", "-y", "-threads", "auto", "-i", temp.name, "-codec", "copy", temp_fixed.name],
-                                    capture_output=True)
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-threads",
+                    "auto",
+                    "-i",
+                    temp.name,
+                    "-codec",
+                    "copy",
+                    temp_fixed.name,
+                ],
+                capture_output=True,
+            )
             if result.returncode != 0:
-                raise RuntimeError(f"Run ffmpeg failed with code {result.returncode}, Error occurred:\n{result.stderr}")
+                raise RuntimeError(
+                    f"Run ffmpeg failed with code {result.returncode}, Error occurred:\n{result.stderr}"
+                )
             temp_fixed.seek(0)
             data = temp_fixed.read()
     return _video_to_webp(data)
@@ -97,10 +143,10 @@ def process_frame(frame):
     """
     Process GIF frame, repair edges, ensure no white or semi-transparent pixels, while keeping color information intact.
     """
-    frame = frame.convert('RGBA')
+    frame = frame.convert("RGBA")
 
     # Decompose Alpha channel
-    alpha = frame.getchannel('A')
+    alpha = frame.getchannel("A")
 
     # Process Alpha channel with threshold, remove semi-transparent pixels
     # Threshold can be adjusted as needed (0-255), 128 is the middle value
@@ -125,19 +171,31 @@ def webp_to_others(data: bytes, mimetype: str) -> bytes:
     with Image.open(BytesIO(data)) as webp:
         with BytesIO() as img:
             print(".", end="", flush=True)
-            webp.info.pop('background', None)
+            webp.info.pop("background", None)
 
             if mimetype == "image/gif":
                 frames = []
-                duration = [100, ]
+                duration = [
+                    100,
+                ]
 
                 for frame in ImageSequence.Iterator(webp):
                     frame = process_frame(frame)
                     frames.append(frame)
-                    duration.append(frame.info.get('duration', duration[-1]))
+                    duration.append(frame.info.get("duration", duration[-1]))
 
-                frames[0].save(img, format=format, save_all=True, lossless=True, quality=100, method=6,
-                               append_images=frames[1:], loop=0, duration=duration[1:], disposal=2)
+                frames[0].save(
+                    img,
+                    format=format,
+                    save_all=True,
+                    lossless=True,
+                    quality=100,
+                    method=6,
+                    append_images=frames[1:],
+                    loop=0,
+                    duration=duration[1:],
+                    disposal=2,
+                )
             else:
                 webp.save(img, format=format, lossless=True, quality=100, method=6)
 
@@ -177,10 +235,14 @@ def opermize_gif(data: bytes) -> bytes:
         gif.write(data)
         gif.flush()
         # use gifsicle to optimize gif
-        result = subprocess.run(["gifsicle", "--batch", "--optimize=3", "--colors=256", gif.name],
-                                capture_output=True)
+        result = subprocess.run(
+            ["gifsicle", "--batch", "--optimize=3", "--colors=256", gif.name],
+            capture_output=True,
+        )
         if result.returncode != 0:
-            raise RuntimeError(f"Run gifsicle failed with code {result.returncode}, Error occurred:\n{result.stderr}")
+            raise RuntimeError(
+                f"Run gifsicle failed with code {result.returncode}, Error occurred:\n{result.stderr}"
+            )
         gif.seek(0)
         return gif.read()
 
@@ -191,16 +253,22 @@ def _convert_image(data: bytes, mimetype: str) -> (bytes, int, int):
             # Determine if the image is a GIF
             is_animated = getattr(image, "is_animated", False)
             if is_animated:
-                frames = [frame.convert("RGBA") for frame in ImageSequence.Iterator(image)]
+                frames = [
+                    frame.convert("RGBA") for frame in ImageSequence.Iterator(image)
+                ]
                 # Save the new GIF
                 frames[0].save(
                     new_file,
-                    format='GIF',
+                    format="GIF",
                     save_all=True,
                     append_images=frames[1:],
-                    loop=image.info.get('loop', 0),  # Default loop to 0 if not present
-                    duration=image.info.get('duration', 100),  # Set a default duration if not present
-                    disposal=image.info.get('disposal', 2)  # Default to disposal method 2 (restore to background)
+                    loop=image.info.get("loop", 0),  # Default loop to 0 if not present
+                    duration=image.info.get(
+                        "duration", 100
+                    ),  # Set a default duration if not present
+                    disposal=image.info.get(
+                        "disposal", 2
+                    ),  # Default to disposal method 2 (restore to background)
                 )
                 # Get the size of the first frame to determine resizing
                 w, h = frames[0].size
@@ -231,6 +299,7 @@ def _convert_sticker(data: bytes) -> (bytes, str, int, int):
         print(".", end="", flush=True)
         # unzip file
         import gzip
+
         with gzip.open(BytesIO(data), "rb") as f:
             data = f.read()
             mimetype = guess_mime(data)
@@ -241,11 +310,14 @@ def _convert_sticker(data: bytes) -> (bytes, str, int, int):
                     # run lottie_convert.py input output
                     print(".", end="", flush=True)
                     import subprocess
+
                     cmd = ["lottie_convert.py", temp.name, gif.name]
                     result = subprocess.run(cmd, capture_output=True, text=True)
                     retcode = result.returncode
                     if retcode != 0:
-                        raise RuntimeError(f"Run {cmd} failed with code {retcode}, Error occurred:\n{result.stderr}")
+                        raise RuntimeError(
+                            f"Run {cmd} failed with code {retcode}, Error occurred:\n{result.stderr}"
+                        )
                     gif.seek(0)
                     data = gif.read()
     mimetype = guess_mime(data)
@@ -273,6 +345,22 @@ def convert_sticker(data: bytes) -> (bytes, str, int, int):
         raise e
 
 
+def convert_image(data: bytes, max_w=256, max_h=256) -> (bytes, int, int):
+    image: Image.Image = Image.open(BytesIO(data)).convert("RGBA")
+    new_file = BytesIO()
+    image.save(new_file, "png")
+    w, h = image.size
+    if w > max_w or h > max_h:
+        # Set the width and height to lower values so clients wouldn't show them as huge images
+        if w > h:
+            h = int(h / (w / max_w))
+            w = max_w
+        else:
+            w = int(w / (h / max_h))
+            h = max_h
+    return new_file.getvalue(), w, h
+
+
 def add_to_index(name: str, output_dir: str) -> None:
     index_path = os.path.join(output_dir, "index.json")
     try:
@@ -289,8 +377,9 @@ def add_to_index(name: str, output_dir: str) -> None:
         print(f"Added {name} to {index_path}")
 
 
-def make_sticker(mxc: str, width: int, height: int, size: int,
-                 mimetype: str, body: str = "") -> matrix.StickerInfo:
+def make_sticker(
+    mxc: str, width: int, height: int, size: int, mimetype: str, body: str = ""
+) -> matrix.StickerInfo:
     return {
         "body": body,
         "url": mxc,
@@ -299,7 +388,6 @@ def make_sticker(mxc: str, width: int, height: int, size: int,
             "h": height,
             "size": size,
             "mimetype": mimetype,
-
             # Element iOS compatibility hack
             "thumbnail_url": mxc,
             "thumbnail_info": {
@@ -311,3 +399,17 @@ def make_sticker(mxc: str, width: int, height: int, size: int,
         },
         "msgtype": "m.sticker",
     }
+
+
+def add_thumbnails(
+    stickers: List[matrix.StickerInfo], stickers_data: Dict[str, bytes], output_dir: str
+) -> None:
+    thumbnails = Path(output_dir, "thumbnails")
+    thumbnails.mkdir(parents=True, exist_ok=True)
+
+    for sticker in stickers:
+        image_data, _, _ = convert_image(stickers_data[sticker["url"]], 128, 128)
+
+        name = sticker["url"].split("/")[-1]
+        thumbnail_path = thumbnails / name
+        thumbnail_path.write_bytes(image_data)
